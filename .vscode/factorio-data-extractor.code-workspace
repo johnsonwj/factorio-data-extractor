@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "C:\\Users\\johns\\Documents\\Projects\\factorio-data-extractor"
+		},
+		{
+			"path": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Factorio\\data"
+		}
+	],
+	"settings": {
+		"editor.insertSpaces": true,
+		"editor.tabSize": 2
+	}
+}
