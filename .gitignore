@@ -1,3 +1,4 @@
 .stack-work/
 factorio-data-extractor.cabal
 *~
+*.json
