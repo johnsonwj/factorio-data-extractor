@@ -145,5 +145,6 @@ loadFactorioData = do
   require "base.data"
   require "base.data-updates"
   getglobal "data"
+  getfield stackTop "raw"
   dataValue <- peek stackTop :: Lua LuaValue
   return (toJSON dataValue)
