@@ -5,6 +5,24 @@
 
 ## how to pull out relevant data
 
+types that can contain extra material data:
+* item
+* fluid
+* gun
+* car
+* module
+* capsule
+* ammo
+* armor
+* cargo-wagon
+* tool
+* artillery-wagon
+* resource
+* locomotive
+* fluid-wagon
+* repair-tool
+* rail-planner
+
 data.raw is organized by type
 
 1. keep everything with type `recipe` (unless it has a hidden flag)

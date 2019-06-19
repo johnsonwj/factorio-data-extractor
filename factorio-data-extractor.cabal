@@ -24,6 +24,8 @@ executable factorio-data-extractor-exe
   other-modules:
       Paths_factorio_data_extractor
       FactorioLua
+      FactorioData
+      -- FactorioData.Raw
   hs-source-dirs:
       src
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
@@ -36,5 +38,7 @@ executable factorio-data-extractor-exe
     , aeson
     , aeson-pretty
     , text
+    , unordered-containers
+    , vector
   default-language: Haskell2010
   default-extensions: OverloadedStrings
