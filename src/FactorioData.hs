@@ -1,14 +1,18 @@
+{-# LANGUAGE DeriveGeneric #-}
+
 module FactorioData where
 
+import Prelude hiding (lookup)
 import Data.Aeson
-import Data.Aeson.Types (Parser, parseMaybe, typeMismatch)
+import Data.Aeson.Types (Parser, parseMaybe, typeMismatch, modifyFailure)
 import Data.Ratio
 import Data.Text hiding (map, filter, concatMap, empty)
+import Data.Text.Encoding (encodeUtf8)
 import Data.HashMap.Strict hiding (map, filter)
 import qualified Data.Vector as V
 import Data.Maybe (fromMaybe)
-
-type WidgetName = Text
+import Data.Scientific (Scientific, toRealFloat, toBoundedInteger)
+import GHC.Generics (Generic)
 
 data FactorioData = FactorioData
     { icons :: HashMap Text Text
@@ -16,19 +20,24 @@ data FactorioData = FactorioData
     , technologies :: [Technology]
     , resources :: [Resource]
     , fluids :: [Fluid]
-    }
+    } deriving (Generic)
 
 instance FromJSON FactorioData where
     parseJSON = withObject "data" $ \obj -> do
-        -- expected Text, encountered Object?
         is <- getIcons obj
-
         -- todo: these need to unpack protos-by-type into lists of protos
-        rs <- obj .: "recipe"
-        ts <- obj .: "technology"
-        res <- obj .: "resource"
-        fs <- obj .: "fluid"
+        rs <- protosForType obj "recipe"
+        ts <- protosForType obj "technology"
+        res <- protosForType obj "resource"
+        fs <- protosForType obj "fluid"
         return (FactorioData is rs ts res fs)
+
+instance ToJSON FactorioData
+
+protosForType :: (FromJSON a) => Object -> Text -> Parser [a]
+protosForType allData typeName = do
+    protosByName <- withObject (unpack typeName ++ " protos") return (allData ! typeName)
+    sequence $ parseJSON <$> elems protosByName
 
 getIcons :: Object -> Parser (HashMap Text Text)
 getIcons obj = do
@@ -38,19 +47,21 @@ getIcons obj = do
     return $ fromList iconPairs
 
 hasIcon :: Object -> Bool
-hasIcon = member "icon"
+hasIcon proto = case lookup "icon" proto of
+    Just (String _) -> True
+    _               -> False
 
 getIconPair :: Object -> Parser (Text, Text)
 getIconPair proto = do
-    pn <- parseJSON $ proto ! "name"
-    pi <- parseJSON $ proto ! "icon"
+    pn <- modifyFailure (++ " - proto name") $ parseJSON $ proto ! "name"
+    pi <- modifyFailure (++ " - proto icon") $ parseJSON $ proto ! "icon"
     return (pn, pi)
 
 data Recipe = Recipe
     { recipeName    :: Text
     , normal        :: RecipeInfo
     , expensive     :: Maybe RecipeInfo
-    }
+    } deriving (Generic)
 
 instance FromJSON Recipe where
     parseJSON = withObject "recipe" $ \obj -> do
@@ -61,11 +72,13 @@ instance FromJSON Recipe where
             else parseJSON (Object obj)
         return (Recipe rn ni ei)
 
+instance ToJSON Recipe
+
 data RecipeInfo = RecipeInfo
     { ingredients   :: [Ingredient]
     , results       :: [RecipeResult]
     , effort        :: Rational
-    }
+    } deriving (Generic)
 
 instance FromJSON RecipeInfo where
     parseJSON = withObject "recipe info" $ \obj -> do
@@ -75,15 +88,17 @@ instance FromJSON RecipeInfo where
                 rn <- obj .: "result"
                 return [DeterministicResult rn 1]
             else obj .: "results"
-        eff <- fromMaybe 0.5 <$> (obj .:? "energy_required")
+        eff <- fromMaybe 0.5 <$> fmap (fmap convertScientific) (obj .:? "energy_required")
         return (RecipeInfo is rs eff)
 
-data Ingredient = Ingredient Text Int
+instance ToJSON RecipeInfo
+
+data Ingredient = Ingredient Text Int deriving (Generic)
 
 instance FromJSON Ingredient where
     parseJSON (Array arr) = do
         name <- parseJSON ((V.!) arr 0)
-        ic <- parseJSON ((V.!) arr 1)
+        ic <- parsePossiblyStringyInt ((V.!) arr 1)
         return $ Ingredient name ic
     parseJSON (Object obj) = do
         name <- obj .: "name"
@@ -91,23 +106,28 @@ instance FromJSON Ingredient where
         return $ Ingredient name ic
     parseJSON v = typeMismatch "array or object" v
 
+instance ToJSON Ingredient
+
 data RecipeResult   = DeterministicResult Text Int
                     | ProbabilisticResult Text Int Rational
+                    deriving (Generic)
 
 instance FromJSON RecipeResult where
     parseJSON (Array arr) = do
         rn <- parseJSON ((V.!) arr 0)
-        rc <- parseJSON ((V.!) arr 1)
+        rc <- parsePossiblyStringyInt ((V.!) arr 1)
         return (DeterministicResult rn rc)
     parseJSON (Object obj) = do
         rn <- obj .: "name"
-        rc <- obj .: "amount"
-        rp <- obj .:? "probability"
+        rc <- parsePossiblyStringyInt (obj ! "amount")
+        rp <- fmap (fmap convertScientific) (obj .:? "probability")
         return $ case rp of
             Just p  -> ProbabilisticResult rn rc p
             Nothing -> DeterministicResult rn rc
     parseJSON v = typeMismatch "array or object" v
-                                            
+
+instance ToJSON RecipeResult
+
 data Technology = Technology
     { technologyName :: Text
     , prerequisites :: [Text]
@@ -115,40 +135,56 @@ data Technology = Technology
     , researchUnitTime :: Int
     , researchUnitCount :: Int
     , researchUnitIngredients :: [Ingredient]
-    }
+    } deriving (Generic)
 
 instance FromJSON Technology where
     parseJSON = withObject "technology" $ \obj -> do
         tn <- obj .: "name"
-        pr <- obj .: "prerequisites"
-        es <- obj .: "effects"
-        (ut, uc, uis) <- parseTechnologyUnit (obj ! "unit")
+        let withTechInfo = modifyFailure (++ " - tech " ++ unpack tn)
+        pr <- withTechInfo $ fromMaybe [] <$> obj .:? "prerequisites"
+        es <- withTechInfo $ fromMaybe [] <$> obj .:? "effects"
+        (ut, uc, uis) <- withTechInfo $ parseTechnologyUnit (obj ! "unit")
         return $ Technology tn pr es ut uc uis
+
+instance ToJSON Technology
 
 parseTechnologyUnit :: Value -> Parser (Int, Int, [Ingredient])
 parseTechnologyUnit = withObject "technology unit" $ \obj -> do
-    ut <- obj .: "time"
-    uc <- obj .: "count"
+    ut <- parsePossiblyStringyInt (obj ! "time")
+
+    -- count might be a stringified int...eg mining-productivity-1
+    -- might be helpful to do this check generically e_e
+    -- also, the default val here is for stuff that has a "count_formula", eg demo-productivity-1
+    uc <- maybe (return 0) parsePossiblyStringyInt (lookup "count" obj)
     uis <- obj .: "ingredients"
     return (ut, uc, uis)
 
 data TechnologyEffect   = ModifierEffect ModifierTarget Rational
                         | RecipeUnlock Text
+                        | EffectToggle Text Bool
+                        deriving (Generic)
 
 instance FromJSON TechnologyEffect where
     parseJSON = withObject "technology effect" $ \obj -> do
         et <- (obj .: "type") :: Parser Text
         if et == "unlock-recipe"
             then RecipeUnlock <$> obj .: "recipe"
-            else do
-                mv <- obj .: "modifier"
-                mt <- parseJSON (Object obj)
-                return (ModifierEffect mt mv)
+            else case obj ! "modifier" of
+                Number _    -> parseModifierEffect obj
+                Bool b      -> return $ EffectToggle et b
+                _           -> typeMismatch "number or bool" (obj ! "modifier")
 
+instance ToJSON TechnologyEffect
 
+parseModifierEffect :: Object -> Parser TechnologyEffect
+parseModifierEffect obj = do
+    mv <- obj .: "modifier" >>= parseRational
+    mt <- parseJSON (Object obj)
+    return (ModifierEffect mt mv)
 
 data ModifierTarget = GenericModifier Text
                     | AmmoCategoryModifier Text Text
+                    deriving (Generic)
 
 instance FromJSON ModifierTarget where
     parseJSON = withObject "modifier effect" $ \obj -> do
@@ -158,26 +194,30 @@ instance FromJSON ModifierTarget where
             Just categoryName   -> AmmoCategoryModifier mt categoryName
             Nothing             -> GenericModifier mt
 
+instance ToJSON ModifierTarget
+
 data Fluid = Fluid
     { fluidName :: Text
     , heatCapacity :: Rational
     , maxTemperature :: Rational
     , defaultTemperature :: Rational
-    }
+    } deriving (Generic)
 
 instance FromJSON Fluid where
     parseJSON = withObject "fluid" $ \obj -> do
         fn <- obj .: "name"
         let fhc = 0
-        fmt <- obj .: "max_temperature"
-        fdt <- obj .: "default_temperature"
+        fmt <- obj .: "max_temperature" >>= parseRational
+        fdt <- obj .: "default_temperature" >>= parseRational
         return $ Fluid fn fhc fmt fdt
+
+instance ToJSON Fluid
 
 data Resource = Resource
     { resourceName :: Text
     , miningTime :: Rational
     , requiredFluid :: Maybe MiningFluid
-    }
+    } deriving (Generic)
 
 instance FromJSON Resource where
     parseJSON = withObject "resource" $ \obj -> do
@@ -187,13 +227,34 @@ instance FromJSON Resource where
         let rf = parseMaybe parseJSON minable
         return (Resource rn mt rf)
 
-getMiningTime :: Object -> Parser Rational
-getMiningTime obj = obj .: "mining_time"
+instance ToJSON Resource
 
-data MiningFluid = MiningFluid Text Rational
+getMiningTime :: Object -> Parser Rational
+getMiningTime obj = obj .: "mining_time" >>= parseRational
+
+data MiningFluid = MiningFluid Text Rational deriving (Generic)
 
 instance FromJSON MiningFluid where
     parseJSON = withObject "minable" $ \obj -> do
         rf <- obj .: "required_fluid"
-        fa <- obj .: "fluid_amount"
+        fa <- obj .: "fluid_amount" >>= parseRational
         return (MiningFluid rf fa)
+
+instance ToJSON MiningFluid
+
+parseRational :: Value -> Parser Rational
+parseRational = withScientific "rational" (return . convertScientific)
+
+convertScientific :: Scientific -> Rational
+convertScientific sci = approxRational rf 0.0000001
+    where
+        rf = toRealFloat sci
+        (n, f) = properFraction sci
+        frf = toRealFloat f
+        err = 10 ** (fromIntegral . floor $ logBase 10 frf) :: Float
+
+parsePossiblyStringyInt :: Value -> Parser Int
+parsePossiblyStringyInt v = case v of
+    String s    -> return . read . unpack $ s
+    Number n    -> return . fromMaybe 0 . toBoundedInteger $ n
+    _           -> typeMismatch "string or number" v

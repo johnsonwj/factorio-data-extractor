@@ -22,7 +22,9 @@ main = do
 doStuff :: Value -> IO ()
 doStuff v = case (fromJSON v :: Result FactorioData) of
   Error e -> putStrLn $ "error: " ++ e
-  Success d -> putStrLn "success!" -- writeFile "data.json" $ encodePretty v
+  Success d -> do
+    putStrLn "success!"
+    writeFile "data.json" $ encodePretty d
 
 printStuff :: Value -> IO ()
 printStuff v = case v of
