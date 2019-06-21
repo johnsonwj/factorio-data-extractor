@@ -231,20 +231,40 @@ instance ToJSON ModifierTarget
 
 data Fluid = Fluid
     { fluidName :: Text
-    , heatCapacity :: Rational
-    , maxTemperature :: Rational
-    , defaultTemperature :: Rational
+    , heatCapacity :: Quantity
+    , maxTemperature :: Quantity
+    , defaultTemperature :: Quantity
     } deriving (Generic)
 
 instance FromJSON Fluid where
     parseJSON = withObject "fluid" $ \obj -> do
         fn <- obj .: "name"
-        let fhc = 0
-        fmt <- obj .: "max_temperature" >>= parseRational
-        fdt <- obj .: "default_temperature" >>= parseRational
+        let withFluidInfo = modifyFailure (++ " - fluid " ++ unpack fn)
+        fhc <- withFluidInfo $ obj .: "heat_capacity"
+        fmt <- withFluidInfo $ obj .: "max_temperature"
+        fdt <- withFluidInfo $ obj .: "default_temperature"
         return $ Fluid fn fhc fmt fdt
 
 instance ToJSON Fluid
+
+data Quantity = Quantity { value :: Rational, unit :: Maybe Text } deriving (Generic)
+
+instance FromJSON Quantity where
+    parseJSON val = case val of
+        String s -> parseStringQuantity s
+        Number n -> return $ Quantity (convertScientific n) Nothing
+        _        -> typeMismatch "string or number" val
+
+parseStringQuantity :: Text -> Parser Quantity
+parseStringQuantity s = do
+    let (sv, u) = span (not . isAlpha) s
+    v <- maybe
+        (typeMismatch "quantity val" (String s))
+        (withScientific "quantity value" (return . convertScientific))
+        (decode . fromStrict . encodeUtf8 $ sv)
+    return $ Quantity v (Just u)
+
+instance ToJSON Quantity
 
 data Resource = Resource
     { resourceName :: Text
