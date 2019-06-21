@@ -36,13 +36,28 @@ instance ToJSON FactorioData
 
 protosForType :: (FromJSON a) => Object -> Text -> Parser [a]
 protosForType allData typeName = do
-    protosByName <- withObject (unpack typeName ++ " protos") return (allData ! typeName)
-    sequence $ parseJSON <$> elems protosByName
+    protosByName <- withObject (unpack typeName ++ " protos")
+                               return
+                               (allData ! typeName)
+    sequence $ parseJSON <$> filter isEnabled (elems protosByName)
+
+isEnabled :: Value -> Bool
+isEnabled (Object obj) = isNotDisabled && noHiddenFlag
+  where
+    isNotDisabled = case lookup "enabled" obj of
+        Just (Bool False) -> False
+        _                 -> True
+
+    noHiddenFlag = notElem (String "hidden") $ case lookup "flags" obj of
+        Just (Array fs) -> fs
+        _               -> V.empty
+isEnabled _ = True
 
 getIcons :: Object -> Parser (HashMap Text Text)
 getIcons obj = do
     protosByType <- sequence $ withObject "protos by type" return <$> elems obj
-    protos <- sequence $ withObject "proto" return <$> concatMap elems protosByType
+    protos       <-
+        sequence $ withObject "proto" return <$> concatMap elems protosByType
     iconPairs <- mapM getIconPair . filter hasIcon $ protos
     return $ fromList iconPairs
 
