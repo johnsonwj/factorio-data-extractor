@@ -141,3 +141,15 @@ loadFactorioData = do
     dataValue <- peek stackTop :: Lua LuaValue
     return (toJSON dataValue)
 
+getFactorioVersion :: IO Text
+getFactorioVersion = do
+    info <- decodeFileStrict (unpack factorioDataPathRoot ++ "/base/info.json")
+    return $ maybe "unknown" version info
+
+newtype FactorioInfo = FactorioInfo { version :: Text }
+
+instance FromJSON FactorioInfo where
+    parseJSON = withObject "info" $ \obj -> do
+        v <- obj .: "version"
+        return $ FactorioInfo v
+
