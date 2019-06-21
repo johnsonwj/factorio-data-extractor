@@ -25,7 +25,6 @@ executable factorio-data-extractor-exe
       Paths_factorio_data_extractor
       FactorioLua
       FactorioData
-      -- FactorioData.Raw
   hs-source-dirs:
       src
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
