@@ -15,22 +15,23 @@ import Data.Scientific (Scientific, toRealFloat, toBoundedInteger)
 import GHC.Generics (Generic)
 
 data FactorioData = FactorioData
-    { icons :: HashMap Text Text
-    , recipes :: [Recipe]
-    , technologies :: [Technology]
-    , resources :: [Resource]
-    , fluids :: [Fluid]
+    { icons                 :: HashMap Text Text
+    , recipes               :: [Recipe]
+    , assemblingMachines    :: [AssemblingMachine]
+    , technologies          :: [Technology]
+    , resources             :: [Resource]
+    , fluids                :: [Fluid]
     } deriving (Generic)
 
 instance FromJSON FactorioData where
     parseJSON = withObject "data" $ \obj -> do
-        is <- getIcons obj
-        -- todo: these need to unpack protos-by-type into lists of protos
-        rs <- protosForType obj "recipe"
-        ts <- protosForType obj "technology"
+        is  <- getIcons obj
+        rs  <- protosForType obj "recipe"
+        ams <- protosForType obj "assembling-machine"
+        ts  <- protosForType obj "technology"
         res <- protosForType obj "resource"
-        fs <- protosForType obj "fluid"
-        return (FactorioData is rs ts res fs)
+        fs  <- protosForType obj "fluid"
+        return (FactorioData is rs ams ts res fs)
 
 instance ToJSON FactorioData
 
@@ -73,19 +74,21 @@ getIconPair proto = do
     return (pn, pi)
 
 data Recipe = Recipe
-    { recipeName    :: Text
-    , normal        :: RecipeInfo
-    , expensive     :: Maybe RecipeInfo
+    { recipeName        :: Text
+    , recipeCategory    :: Text
+    , normal            :: RecipeInfo
+    , expensive         :: Maybe RecipeInfo
     } deriving (Generic)
 
 instance FromJSON Recipe where
     parseJSON = withObject "recipe" $ \obj -> do
         rn <- obj .: "name"
+        rc <- fromMaybe "basic-crafting" <$> obj .:? "category"
         ei <- obj .:? "expensive"
         ni <- if member "normal" obj
             then obj .: "normal"
             else parseJSON (Object obj)
-        return (Recipe rn ni ei)
+        return (Recipe rn rc ni ei)
 
 instance ToJSON Recipe
 
@@ -142,6 +145,21 @@ instance FromJSON RecipeResult where
     parseJSON v = typeMismatch "array or object" v
 
 instance ToJSON RecipeResult
+
+data AssemblingMachine = AssemblingMachine
+    { assemblerName :: Text
+    , craftingSpeed :: Rational
+    , craftingCategories :: [Text]
+    } deriving (Generic)
+
+instance FromJSON AssemblingMachine where
+    parseJSON = withObject "assembling machine" $ \obj -> do
+        an <- obj .: "name"
+        cs <- obj .: "crafting_speed" >>= parseRational
+        cc <- obj .: "crafting_categories"
+        return $ AssemblingMachine an cs cc
+
+instance ToJSON AssemblingMachine
 
 data Technology = Technology
     { technologyName :: Text
