@@ -2,17 +2,33 @@
 
 module FactorioData where
 
-import Prelude hiding (lookup)
-import Data.Aeson
-import Data.Aeson.Types (Parser, parseMaybe, typeMismatch, modifyFailure)
-import Data.Ratio
-import Data.Text hiding (map, filter, concatMap, empty)
-import Data.Text.Encoding (encodeUtf8)
-import Data.HashMap.Strict hiding (map, filter)
-import qualified Data.Vector as V
-import Data.Maybe (fromMaybe)
-import Data.Scientific (Scientific, toRealFloat, toBoundedInteger)
-import GHC.Generics (Generic)
+import           Prelude                 hiding ( lookup
+                                                , span
+                                                )
+import           Data.Aeson
+import           Data.Aeson.Types               ( Parser
+                                                , parseMaybe
+                                                , typeMismatch
+                                                , modifyFailure
+                                                )
+import           Data.Char                      ( isAlpha )
+import           Data.Ratio
+import           Data.Text                      ( Text
+                                                , unpack
+                                                , span
+                                                )
+import           Data.Text.Encoding             ( encodeUtf8 )
+import           Data.ByteString.Lazy           ( fromStrict )
+import           Data.HashMap.Strict     hiding ( map
+                                                , filter
+                                                )
+import qualified Data.Vector                   as V
+import           Data.Maybe                     ( fromMaybe )
+import           Data.Scientific                ( Scientific
+                                                , toRealFloat
+                                                , toBoundedInteger
+                                                )
+import           GHC.Generics                   ( Generic )
 
 data FactorioData = FactorioData
     { icons                 :: HashMap Text Text
@@ -106,7 +122,8 @@ instance FromJSON RecipeInfo where
                 rn <- obj .: "result"
                 return [DeterministicResult rn 1]
             else obj .: "results"
-        eff <- fromMaybe 0.5 <$> fmap (fmap convertScientific) (obj .:? "energy_required")
+        eff <- fromMaybe 0.5
+            <$> fmap (fmap convertScientific) (obj .:? "energy_required")
         return (RecipeInfo is rs eff)
 
 instance ToJSON RecipeInfo
@@ -116,11 +133,11 @@ data Ingredient = Ingredient Text Int deriving (Generic)
 instance FromJSON Ingredient where
     parseJSON (Array arr) = do
         name <- parseJSON ((V.!) arr 0)
-        ic <- parsePossiblyStringyInt ((V.!) arr 1)
+        ic   <- parsePossiblyStringyInt ((V.!) arr 1)
         return $ Ingredient name ic
     parseJSON (Object obj) = do
         name <- obj .: "name"
-        ic <- obj .: "amount"
+        ic   <- obj .: "amount"
         return $ Ingredient name ic
     parseJSON v = typeMismatch "array or object" v
 
@@ -174,8 +191,8 @@ instance FromJSON Technology where
     parseJSON = withObject "technology" $ \obj -> do
         tn <- obj .: "name"
         let withTechInfo = modifyFailure (++ " - tech " ++ unpack tn)
-        pr <- withTechInfo $ fromMaybe [] <$> obj .:? "prerequisites"
-        es <- withTechInfo $ fromMaybe [] <$> obj .:? "effects"
+        pr            <- withTechInfo $ fromMaybe [] <$> obj .:? "prerequisites"
+        es            <- withTechInfo $ fromMaybe [] <$> obj .:? "effects"
         (ut, uc, uis) <- withTechInfo $ parseTechnologyUnit (obj ! "unit")
         return $ Technology tn pr es ut uc uis
 
@@ -183,12 +200,10 @@ instance ToJSON Technology
 
 parseTechnologyUnit :: Value -> Parser (Int, Int, [Ingredient])
 parseTechnologyUnit = withObject "technology unit" $ \obj -> do
-    ut <- parsePossiblyStringyInt (obj ! "time")
+    ut  <- parsePossiblyStringyInt (obj ! "time")
 
-    -- count might be a stringified int...eg mining-productivity-1
-    -- might be helpful to do this check generically e_e
-    -- also, the default val here is for stuff that has a "count_formula", eg demo-productivity-1
-    uc <- maybe (return 0) parsePossiblyStringyInt (lookup "count" obj)
+    -- default val here is for stuff that has a "count_formula", eg demo-productivity-1
+    uc  <- maybe (return 0) parsePossiblyStringyInt (lookup "count" obj)
     uis <- obj .: "ingredients"
     return (ut, uc, uis)
 
@@ -203,9 +218,9 @@ instance FromJSON TechnologyEffect where
         if et == "unlock-recipe"
             then RecipeUnlock <$> obj .: "recipe"
             else case obj ! "modifier" of
-                Number _    -> parseModifierEffect obj
-                Bool b      -> return $ EffectToggle et b
-                _           -> typeMismatch "number or bool" (obj ! "modifier")
+                Number _ -> parseModifierEffect obj
+                Bool   b -> return $ EffectToggle et b
+                _        -> typeMismatch "number or bool" (obj ! "modifier")
 
 instance ToJSON TechnologyEffect
 
@@ -224,8 +239,8 @@ instance FromJSON ModifierTarget where
         mt <- obj .: "type"
         ac <- obj .:? "ammo_category"
         return $ case ac of
-            Just categoryName   -> AmmoCategoryModifier mt categoryName
-            Nothing             -> GenericModifier mt
+            Just categoryName -> AmmoCategoryModifier mt categoryName
+            Nothing           -> GenericModifier mt
 
 instance ToJSON ModifierTarget
 
@@ -274,9 +289,9 @@ data Resource = Resource
 
 instance FromJSON Resource where
     parseJSON = withObject "resource" $ \obj -> do
-        rn <- obj .: "name"
+        rn      <- obj .: "name"
         minable <- obj .: "minable"
-        mt <- withObject "minable" getMiningTime minable
+        mt      <- withObject "minable" getMiningTime minable
         let rf = parseMaybe parseJSON minable
         return (Resource rn mt rf)
 
@@ -300,14 +315,14 @@ parseRational = withScientific "rational" (return . convertScientific)
 
 convertScientific :: Scientific -> Rational
 convertScientific sci = approxRational rf 0.0000001
-    where
-        rf = toRealFloat sci
-        (n, f) = properFraction sci
-        frf = toRealFloat f
-        err = 10 ** (fromIntegral . floor $ logBase 10 frf) :: Float
+  where
+    rf     = toRealFloat sci
+    (n, f) = properFraction sci
+    frf    = toRealFloat f
+    err    = 10 ** (fromIntegral . floor $ logBase 10 frf) :: Float
 
 parsePossiblyStringyInt :: Value -> Parser Int
 parsePossiblyStringyInt v = case v of
-    String s    -> return . read . unpack $ s
-    Number n    -> return . fromMaybe 0 . toBoundedInteger $ n
-    _           -> typeMismatch "string or number" v
+    String s -> return . read . unpack $ s
+    Number n -> return . fromMaybe 0 . toBoundedInteger $ n
+    _        -> typeMismatch "string or number" v
